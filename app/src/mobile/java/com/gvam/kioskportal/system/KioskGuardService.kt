@@ -23,7 +23,6 @@ class KioskGuardService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-        // Asegura flags de filtro de teclas por si el XML se queda corto
         serviceInfo = serviceInfo.apply {
             flags = flags or AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
         }
@@ -33,18 +32,15 @@ class KioskGuardService : AccessibilityService() {
         if (!shouldRunKiosk()) return
         if (event == null) return
 
-        // Evita rebotes excesivos
         val now = SystemClock.uptimeMillis()
         if (now - lastBounceAt < 700) return
 
         val pkg = event.packageName?.toString() ?: return
-        // Si ya estamos en nuestra app (cualquier Activity del paquete), no rebotar
         if (pkg.startsWith(packageName)) return
 
         when (event.eventType) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
             AccessibilityEvent.TYPE_WINDOWS_CHANGED -> {
-                // Rebotar a nuestro launcher
                 lastBounceAt = now
                 bounceHome()
             }
@@ -55,13 +51,13 @@ class KioskGuardService : AccessibilityService() {
         if (!shouldRunKiosk()) return false
         if (event.action != KeyEvent.ACTION_DOWN) return false
 
-        // Hotkey: Ctrl+Alt+K  -> abrir panel (tras PIN)
+        // Ctrl + Alt + K
         if (event.isCtrlPressed && event.isAltPressed && event.keyCode == KeyEvent.KEYCODE_K) {
             openAdminPanel()
             return true
         }
 
-        // Hotkey: F12 ×3 en ≤ 4s
+        // F12 × 3 (≤ 4 s)
         if (event.keyCode == KeyEvent.KEYCODE_F12) {
             val now = SystemClock.uptimeMillis()
             if (now - f12WindowStart > 4000) {
@@ -76,18 +72,14 @@ class KioskGuardService : AccessibilityService() {
             }
             return true
         }
-
         return false
     }
 
-    override fun onInterrupt() {
-        // no-op
-    }
+    override fun onInterrupt() {}
 
-    /* ---------------- helpers ---------------- */
+    /* ------------ helpers ------------ */
 
     private fun shouldRunKiosk(): Boolean {
-        // kiosco solo si (IS_TOTEM || KIOSK_FORCE) y SIN mantenimiento
         val isKioskMode = BuildConfig.IS_TOTEM || BuildConfig.KIOSK_FORCE
         return isKioskMode && !isMaintenanceActive()
     }
@@ -98,22 +90,25 @@ class KioskGuardService : AccessibilityService() {
 
     private fun bounceHome() {
         val i = Intent(this, MainActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                    Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP
+            )
         }
         startActivity(i)
     }
 
     private fun openAdminPanel() {
-        // Marca acción pendiente para que MainActivity muestre PIN -> Panel técnico
         getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
             .edit().putString(KEY_PENDING_ACTION, PENDING_OPEN_ADMIN).apply()
 
         val i = Intent(this, MainActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                    Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP
+            )
         }
         startActivity(i)
     }
