@@ -9,10 +9,10 @@ import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import com.gvam.kioskportal.BuildConfig
 import com.gvam.kioskportal.ui.MainActivity
+import com.gvam.kioskportal.util.Prefs
 
 private const val PREF_FILE = "portal_prefs"
-private const val KEY_MAINTENANCE = "kiosk_maintenance"
-private const val KEY_PENDING_ACTION = "pending_action" // lo leerá MainActivity
+private const val KEY_PENDING_ACTION = "pending_action"
 private const val PENDING_OPEN_ADMIN = "open_admin"
 
 class KioskGuardService : AccessibilityService() {
@@ -23,6 +23,7 @@ class KioskGuardService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        // Asegura interceptar teclas
         serviceInfo = serviceInfo.apply {
             flags = flags or AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
         }
@@ -30,19 +31,20 @@ class KioskGuardService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (!shouldRunKiosk()) return
-        if (event == null) return
+        event ?: return
 
         val now = SystemClock.uptimeMillis()
-        if (now - lastBounceAt < 700) return
+        if (now - lastBounceAt < 400) return // anti-bucle
 
-        val pkg = event.packageName?.toString() ?: return
-        if (pkg.startsWith(packageName)) return
-
+        // Solo nos interesan cambios de ventana
         when (event.eventType) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
             AccessibilityEvent.TYPE_WINDOWS_CHANGED -> {
-                lastBounceAt = now
-                bounceHome()
+                val pkg = event.packageName?.toString() ?: return
+                if (!isPackageAllowed(pkg)) {
+                    lastBounceAt = now
+                    bounceHome()
+                }
             }
         }
     }
@@ -51,13 +53,13 @@ class KioskGuardService : AccessibilityService() {
         if (!shouldRunKiosk()) return false
         if (event.action != KeyEvent.ACTION_DOWN) return false
 
-        // Ctrl + Alt + K
+        // Ctrl + Alt + K → PIN → panel técnico
         if (event.isCtrlPressed && event.isAltPressed && event.keyCode == KeyEvent.KEYCODE_K) {
-            openAdminPanel()
+            openAdminViaHome()
             return true
         }
 
-        // F12 × 3 (≤ 4 s)
+        // F12 × 3 en ≤ 4 s → PIN → panel técnico
         if (event.keyCode == KeyEvent.KEYCODE_F12) {
             val now = SystemClock.uptimeMillis()
             if (now - f12WindowStart > 4000) {
@@ -68,25 +70,29 @@ class KioskGuardService : AccessibilityService() {
             }
             if (f12Count >= 3) {
                 f12Count = 0
-                openAdminPanel()
+                openAdminViaHome()
             }
             return true
         }
+
         return false
     }
 
     override fun onInterrupt() {}
 
-    /* ------------ helpers ------------ */
+    /* ---------- Lógica de kiosco ---------- */
 
     private fun shouldRunKiosk(): Boolean {
-        val isKioskMode = BuildConfig.IS_TOTEM || BuildConfig.KIOSK_FORCE
-        return isKioskMode && !isMaintenanceActive()
+        val isKiosk = (BuildConfig.IS_TOTEM || BuildConfig.KIOSK_FORCE)
+        return isKiosk && !Prefs.isMaintenance(this)
     }
 
-    private fun isMaintenanceActive(): Boolean =
+    private fun openAdminViaHome() {
+        // Señal a MainActivity para abrir AdminUnlock tras volver a casa
         getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
-            .getBoolean(KEY_MAINTENANCE, false)
+            .edit().putString(KEY_PENDING_ACTION, PENDING_OPEN_ADMIN).apply()
+        bounceHome()
+    }
 
     private fun bounceHome() {
         val i = Intent(this, MainActivity::class.java).apply {
@@ -99,17 +105,33 @@ class KioskGuardService : AccessibilityService() {
         startActivity(i)
     }
 
-    private fun openAdminPanel() {
-        getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
-            .edit().putString(KEY_PENDING_ACTION, PENDING_OPEN_ADMIN).apply()
+    /**
+     * Permitir:
+     *  - tu propio paquete
+     *  - apps seleccionadas por el cliente (Prefs)
+     *  - instalador de paquetes (cuando lanzas una app recién instalada puede pedir permisos)
+     * Bloquear explícitamente:
+     *  - Ajustes, SystemUI (Recents/Overview), otros launchers
+     */
+    private fun isPackageAllowed(pkg: String): Boolean {
+        // Bloqueos explícitos (listas negras)
+        val blacklist = setOf(
+            "com.android.settings",
+            "com.android.systemui",
+            "com.google.android.apps.nexuslauncher",
+            "com.android.launcher3"
+        )
+        if (pkg in blacklist) return false
 
-        val i = Intent(this, MainActivity::class.java).apply {
-            addFlags(
-                Intent.FLAG_ACTIVITY_NEW_TASK or
-                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                        Intent.FLAG_ACTIVITY_SINGLE_TOP
-            )
-        }
-        startActivity(i)
+        // Permitidos
+        val allow = mutableSetOf<String>()
+        allow += packageName
+        allow += Prefs.loadSelectedPackages(this) // apps de negocio elegidas en el picker
+
+        // instaladores / prompts comunes (varía por ROM)
+        allow += "com.android.packageinstaller"
+        allow += "com.google.android.packageinstaller"
+
+        return pkg in allow
     }
 }
