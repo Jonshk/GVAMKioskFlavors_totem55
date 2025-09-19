@@ -1,0 +1,26 @@
+# Android/Gradle
+.gradle/
+.local/
+local.properties
+**/build/
+.cxx/
+.externalNativeBuild/
+
+# IDE
+.idea/
+*.iml
+
+# SO
+.DS_Store
+Thumbs.db
+
+# Keystores y secretos
+*.jks
+*.keystore
+*.pem
+*.p12
+google-services.json
+
+# Mantener el wrapper de Gradle
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
