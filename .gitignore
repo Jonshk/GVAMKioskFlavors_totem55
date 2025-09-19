@@ -24,3 +24,17 @@ google-services.json
 # Mantener el wrapper de Gradle
 !gradle/wrapper/gradle-wrapper.jar
 !gradle/wrapper/gradle-wrapper.properties
+
+# Build outputs / bundles
+**/build/
+app/**/release/
+**/baselineProfiles/**
+captures/
+*.apk
+*.aab
+*.apks
+*.dm
+*.obb
+
+# Heap dumps (Android Studio / Java)
+*.hprof
