@@ -54,7 +54,6 @@ class KioskGuardService : AccessibilityService() {
                              Intent.FLAG_ACTIVITY_SINGLE_TOP)
                 }
                 startActivity(i)
-                sendBroadcast(Intent(MainActivity.ACTION_REPIN))
             }
         }
     }

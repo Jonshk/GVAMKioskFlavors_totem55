@@ -38,3 +38,4 @@ captures/
 
 # Heap dumps (Android Studio / Java)
 *.hprof
+.vscode/
