@@ -2,6 +2,7 @@
 
 package com.gvam.kioskportal.ui
 
+import android.app.admin.DevicePolicyManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -9,21 +10,27 @@ import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.drawable.BitmapDrawable
 import android.os.Bundle
-import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
@@ -38,6 +45,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.key.isAltPressed
 import androidx.compose.ui.input.key.isCtrlPressed
@@ -47,11 +55,15 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.graphics.drawable.toBitmap
 import androidx.core.view.WindowInsetsCompat
@@ -62,11 +74,12 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.gvam.kioskportal.BuildConfig
 import com.gvam.kioskportal.R
 import com.gvam.kioskportal.model.AppEntry
-import com.gvam.kioskportal.util.Prefs
 import com.gvam.kioskportal.util.Pin
-import androidx.compose.foundation.clickable
+import com.gvam.kioskportal.util.Prefs
 
-/* ------------------- Activity (kiosco) ------------------- */
+/* =========================================================
+   ACTIVITY PRINCIPAL MÓVIL
+   ========================================================= */
 
 class MainActivity : ComponentActivity() {
 
@@ -74,214 +87,452 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         enableEdgeToEdge()
-        if (shouldRunKiosk()) enterKioskUi()
 
-        setContent { PortalTheme { PortalScreen() } }
+        if (shouldRunKiosk()) {
+            enterKioskUi()
+        }
+
+        setContent {
+            PortalTheme {
+                PortalScreen()
+            }
+        }
     }
 
     override fun onResume() {
         super.onResume()
-        if (shouldRunKiosk()) enterKioskUi()
+
+        if (shouldRunKiosk()) {
+            enterKioskUi()
+        }
     }
 
-    private fun shouldRunKiosk(): Boolean =
-        (BuildConfig.IS_TOTEM || BuildConfig.KIOSK_FORCE) && !Prefs.isMaintenance(this)
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
 
+        if (hasFocus && shouldRunKiosk()) {
+            configureSystemBars()
+        }
+    }
+
+    private fun shouldRunKiosk(): Boolean {
+        return (BuildConfig.IS_TOTEM || BuildConfig.KIOSK_FORCE) &&
+            !Prefs.isMaintenance(this)
+    }
+
+    /**
+     * Solo inicia Lock Task si vuestro MDM ha autorizado
+     * previamente este paquete.
+     *
+     * Esto evita entrar en PINNED durante las pruebas realizadas
+     * fuera de la política del MDM.
+     */
     private fun enterKioskUi() {
-        runCatching { startLockTask() }
-        WindowInsetsControllerCompat(window, window.decorView).apply {
-            hide(WindowInsetsCompat.Type.systemBars())
+        val devicePolicyManager =
+            getSystemService(DevicePolicyManager::class.java)
+
+        if (devicePolicyManager.isLockTaskPermitted(packageName)) {
+            runCatching {
+                startLockTask()
+            }
+        }
+
+        configureSystemBars()
+    }
+
+    /**
+     * Oculta la barra superior y conserva visible la navegación inferior.
+     *
+     * Cuando el MDM aplique Lock Task multiaplicación, Inicio y Recientes
+     * serán controlados mediante la política del MDM.
+     */
+    private fun configureSystemBars() {
+        window.navigationBarColor =
+            android.graphics.Color.BLACK
+
+        WindowInsetsControllerCompat(
+            window,
+            window.decorView
+        ).apply {
+            hide(WindowInsetsCompat.Type.statusBars())
+            show(WindowInsetsCompat.Type.navigationBars())
+
+            isAppearanceLightStatusBars = false
+            isAppearanceLightNavigationBars = false
+
             systemBarsBehavior =
-                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                WindowInsetsControllerCompat
+                    .BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
     }
 }
 
-/* ------------------- UI raíz ------------------- */
+/* =========================================================
+   PANTALLA PRINCIPAL
+   ========================================================= */
 
-private enum class AdminTarget { None, Menu, TechPanel }
+private enum class AdminTarget {
+    None,
+    Menu,
+    TechPanel
+}
 
 @Composable
 private fun PortalScreen() {
-    val ctx = LocalContext.current
-    val pm = ctx.packageManager
+    val context = LocalContext.current
+    val packageManager = context.packageManager
 
-    var title by remember { mutableStateOf(Prefs.loadTitle(ctx) ?: "GVAM MDM") }
-    var apps by remember { mutableStateOf(loadSelectedEntries(ctx)) }
+    var title by remember {
+        mutableStateOf(
+            Prefs.loadTitle(context) ?: "GVAM MDM"
+        )
+    }
 
-    var gridView by rememberSaveable { mutableStateOf(true) }
-    var showCreatePin by rememberSaveable { mutableStateOf(!Prefs.hasPin(ctx)) }
-    var showVerifyPin by rememberSaveable { mutableStateOf(false) }
-    var showTitleDialog by rememberSaveable { mutableStateOf(false) }
-    var menuOpen by remember { mutableStateOf(false) }
-    var adminTarget by remember { mutableStateOf(AdminTarget.None) }
+    var apps by remember {
+        mutableStateOf(
+            loadSelectedEntries(context)
+        )
+    }
 
-    // Atajo F12 × 3 (≤ 4 s)
-    var f12FirstAt by remember { mutableStateOf(0L) }
-    var f12Count by remember { mutableStateOf(0) }
+    var gridView by rememberSaveable {
+        mutableStateOf(true)
+    }
 
-    // Recarga al volver + acciones pendientes (servicio/USB)
-    val lifecycleOwner = LocalLifecycleOwner.current
+    var showCreatePin by rememberSaveable {
+        mutableStateOf(!Prefs.hasPin(context))
+    }
+
+    var showVerifyPin by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    var showTitleDialog by rememberSaveable {
+        mutableStateOf(false)
+    }
+
+    var menuOpen by remember {
+        mutableStateOf(false)
+    }
+
+    var adminTarget by remember {
+        mutableStateOf(AdminTarget.None)
+    }
+
+    var f12FirstAt by remember {
+        mutableStateOf(0L)
+    }
+
+    var f12Count by remember {
+        mutableStateOf(0)
+    }
+
+    val lifecycleOwner =
+        LocalLifecycleOwner.current
+
     DisposableEffect(lifecycleOwner) {
-        val obs = object : DefaultLifecycleObserver {
-            override fun onResume(owner: LifecycleOwner) {
-                title = Prefs.loadTitle(ctx) ?: "GVAM MDM"
-                apps = loadSelectedEntries(ctx)
+        val observer =
+            object : DefaultLifecycleObserver {
 
-                val sp = ctx.getSharedPreferences("portal_prefs", Context.MODE_PRIVATE)
-                when (sp.getString("pending_action", null)) {
-                    "open_admin" -> {
-                        sp.edit().remove("pending_action").apply()
-                        adminTarget = AdminTarget.TechPanel
-                        showVerifyPin = true
-                    }
-                    "open_menu" -> {
-                        sp.edit().remove("pending_action").apply()
-                        if (Prefs.hasPin(ctx)) {
-                            adminTarget = AdminTarget.Menu
+                override fun onResume(
+                    owner: LifecycleOwner
+                ) {
+                    title =
+                        Prefs.loadTitle(context)
+                            ?: "GVAM MDM"
+
+                    apps =
+                        loadSelectedEntries(context)
+
+                    val preferences =
+                        context.getSharedPreferences(
+                            "portal_prefs",
+                            Context.MODE_PRIVATE
+                        )
+
+                    when (
+                        preferences.getString(
+                            "pending_action",
+                            null
+                        )
+                    ) {
+                        "open_admin" -> {
+                            preferences
+                                .edit()
+                                .remove("pending_action")
+                                .apply()
+
+                            adminTarget =
+                                AdminTarget.TechPanel
+
                             showVerifyPin = true
-                        } else menuOpen = true
+                        }
+
+                        "open_menu" -> {
+                            preferences
+                                .edit()
+                                .remove("pending_action")
+                                .apply()
+
+                            if (Prefs.hasPin(context)) {
+                                adminTarget =
+                                    AdminTarget.Menu
+
+                                showVerifyPin = true
+                            } else {
+                                menuOpen = true
+                            }
+                        }
+                    }
+
+                    if (!Prefs.hasPin(context)) {
+                        showCreatePin = true
                     }
                 }
-
-                if (!Prefs.hasPin(ctx)) showCreatePin = true
             }
+
+        lifecycleOwner.lifecycle.addObserver(
+            observer
+        )
+
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(
+                observer
+            )
         }
-        lifecycleOwner.lifecycle.addObserver(obs)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+
+    fun requestAdminMenu() {
+        if (Prefs.hasPin(context)) {
+            adminTarget =
+                AdminTarget.Menu
+
+            showVerifyPin = true
+        } else {
+            menuOpen = true
+        }
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .onPreviewKeyEvent { ev ->
-                if (ev.nativeKeyEvent.action == android.view.KeyEvent.ACTION_DOWN) {
-                    val code = ev.nativeKeyEvent.keyCode
-                    val ctrlAlt = ev.isCtrlPressed && ev.isAltPressed
+            .onPreviewKeyEvent { event ->
+                if (
+                    event.nativeKeyEvent.action ==
+                    android.view.KeyEvent.ACTION_DOWN
+                ) {
+                    val keyCode =
+                        event.nativeKeyEvent.keyCode
 
-                    if (ctrlAlt && code == android.view.KeyEvent.KEYCODE_K) {
-                        adminTarget = AdminTarget.TechPanel
+                    val ctrlAlt =
+                        event.isCtrlPressed &&
+                            event.isAltPressed
+
+                    if (
+                        ctrlAlt &&
+                        keyCode ==
+                        android.view.KeyEvent.KEYCODE_K
+                    ) {
+                        adminTarget =
+                            AdminTarget.TechPanel
+
                         showVerifyPin = true
+
                         return@onPreviewKeyEvent true
                     }
 
-                    if (code == android.view.KeyEvent.KEYCODE_F12) {
-                        val now = System.currentTimeMillis()
-                        if (now - f12FirstAt > 4000) {
-                            f12FirstAt = now; f12Count = 1
-                        } else f12Count += 1
+                    if (
+                        keyCode ==
+                        android.view.KeyEvent.KEYCODE_F12
+                    ) {
+                        val now =
+                            System.currentTimeMillis()
+
+                        if (
+                            now - f12FirstAt >
+                            4000
+                        ) {
+                            f12FirstAt = now
+                            f12Count = 1
+                        } else {
+                            f12Count += 1
+                        }
+
                         if (f12Count >= 3) {
-                            f12Count = 0; f12FirstAt = 0L
-                            adminTarget = AdminTarget.TechPanel
+                            f12Count = 0
+                            f12FirstAt = 0L
+
+                            adminTarget =
+                                AdminTarget.TechPanel
+
                             showVerifyPin = true
                         }
+
                         return@onPreviewKeyEvent true
                     }
                 }
+
                 false
             }
     ) {
-        BackgroundLayer() // fondo + scrim
+        BackgroundLayer()
 
         Scaffold(
-            containerColor = Color.Transparent,
+            containerColor =
+                Color.Transparent,
+            contentWindowInsets =
+                WindowInsets.safeDrawing,
             topBar = {
-                TopBar(
+                PortalTopBar(
                     title = title,
                     gridView = gridView,
-                    onToggleView = { gridView = !gridView },
+                    onToggleView = {
+                        gridView = !gridView
+                    },
                     menuOpen = menuOpen,
                     onOpenMenu = {
-                        if (Prefs.hasPin(ctx)) {
-                            adminTarget = AdminTarget.Menu
-                            showVerifyPin = true
-                        } else {
-                            menuOpen = true
-                        }
+                        requestAdminMenu()
                     },
-                    onDismissMenu = { menuOpen = false }
-                ) {
-                    MenuEntry("Configurar apps", Icons.Filled.Settings) {
+                    onDismissMenu = {
                         menuOpen = false
-                        ctx.startActivity(Intent(ctx, AppPickerActivity::class.java))
                     }
-                    MenuEntry("Cambiar título", Icons.Filled.Edit) {
+                ) {
+                    MenuEntry(
+                        text = "Aplicaciones",
+                        icon = Icons.Filled.Apps
+                    ) {
+                        menuOpen = false
+
+                        context.startActivity(
+                            Intent(
+                                context,
+                                AppPickerActivity::class.java
+                            )
+                        )
+                    }
+
+                    MenuEntry(
+                        text = "Cambiar título",
+                        icon = Icons.Filled.Edit
+                    ) {
                         menuOpen = false
                         showTitleDialog = true
                     }
-                    // (Wi-Fi eliminado)
-                    if (!Prefs.isSettingsHidden(ctx)) {
-                        // Abrir Ajustes pasando por AdminUnlock para evitar rebote
-                        MenuEntry("Ajustes de Android", Icons.Filled.Settings) {
+
+                    if (
+                        !Prefs.isSettingsHidden(context)
+                    ) {
+                        MenuEntry(
+                            text =
+                                "Ajustes de Android",
+                            icon =
+                                Icons.Filled.Settings
+                        ) {
                             menuOpen = false
-                            ctx.startActivity(
-                                Intent(ctx, AdminUnlockActivity::class.java)
-                                    .putExtra("target", "settings")
+
+                            context.startActivity(
+                                Intent(
+                                    context,
+                                    AdminUnlockActivity::class.java
+                                ).putExtra(
+                                    "target",
+                                    "settings"
+                                )
                             )
                         }
                     }
-                    MenuEntry("Acerca de / Dispositivo", Icons.Filled.Info) {
+
+                    MenuEntry(
+                        text =
+                            "Información del dispositivo",
+                        icon =
+                            Icons.Filled.Info
+                    ) {
                         menuOpen = false
-                        ctx.startActivity(Intent(ctx, AboutActivity::class.java))
+
+                        context.startActivity(
+                            Intent(
+                                context,
+                                AboutActivity::class.java
+                            )
+                        )
                     }
                 }
-            },
-            contentWindowInsets = WindowInsets.safeDrawing
-        ) { padding ->
-            val cfg = LocalConfiguration.current
-            val widthDp = cfg.screenWidthDp
-            val columns = if (!gridView) 1 else when {
-                widthDp >= 840 -> 4
-                widthDp >= 600 -> 3
-                cfg.orientation == Configuration.ORIENTATION_LANDSCAPE && widthDp >= 480 -> 3
-                else -> 2
             }
-
+        ) { padding ->
             when {
                 apps.isEmpty() -> {
-                    Box(
-                        Modifier.fillMaxSize().padding(padding),
-                        contentAlignment = Alignment.Center
-                    ) { Text("No hay aplicaciones seleccionadas", color = Color.White) }
-                }
-                apps.size == 1 -> {
-                    val only = apps.first()
-                    SingleAppSpot(entry = only, padding = padding) {
-                        pm.getLaunchIntentForPackage(only.packageName)
-                            ?.let { ctx.startActivity(it) }
-                    }
-                }
-                else -> {
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(columns),
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(padding)
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        items(apps) { entry ->
-                            AppCard(entry = entry) {
-                                pm.getLaunchIntentForPackage(entry.packageName)
-                                    ?.let { ctx.startActivity(it) }
-                            }
+                    EmptyAppsState(
+                        padding = padding,
+                        onConfigure = {
+                            requestAdminMenu()
                         }
-                    }
+                    )
+                }
+
+                apps.size == 1 -> {
+                    val onlyApp =
+                        apps.first()
+
+                    SingleAppSpot(
+                        entry = onlyApp,
+                        padding = padding,
+                        onClick = {
+                            launchSelectedApp(
+                                context = context,
+                                packageManager =
+                                    packageManager,
+                                entry = onlyApp
+                            )
+                        }
+                    )
+                }
+
+                gridView -> {
+                    AppsGrid(
+                        apps = apps,
+                        padding = padding,
+                        onAppClick = { entry ->
+                            launchSelectedApp(
+                                context = context,
+                                packageManager =
+                                    packageManager,
+                                entry = entry
+                            )
+                        }
+                    )
+                }
+
+                else -> {
+                    AppsList(
+                        apps = apps,
+                        padding = padding,
+                        onAppClick = { entry ->
+                            launchSelectedApp(
+                                context = context,
+                                packageManager =
+                                    packageManager,
+                                entry = entry
+                            )
+                        }
+                    )
                 }
             }
         }
 
-        // Hot-corner (long-press)
+        /*
+         * Esquina técnica secreta.
+         * Se mantiene pulsada la esquina inferior derecha.
+         */
         Box(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .size(96.dp)
-                .padding(8.dp)
+                .size(64.dp)
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onLongPress = {
-                            adminTarget = AdminTarget.TechPanel
+                            adminTarget =
+                                AdminTarget.TechPanel
+
                             showVerifyPin = true
                         }
                     )
@@ -289,36 +540,69 @@ private fun PortalScreen() {
         )
     }
 
-    /* ---------- Diálogos ---------- */
+    /* =====================================================
+       DIÁLOGOS
+       ===================================================== */
 
     if (showCreatePin) {
         PinCreateDialog(
-            onCancel = { /* bloquear cancelar si quieres forzar PIN */ },
+            onCancel = {
+                // El PIN inicial es obligatorio.
+            },
             onConfirm = { newPin ->
-                Pin.savePin(ctx, newPin)
+                Pin.savePin(
+                    context,
+                    newPin
+                )
+
                 showCreatePin = false
-                Toast.makeText(ctx, "PIN creado", Toast.LENGTH_SHORT).show()
+
+                Toast.makeText(
+                    context,
+                    "PIN creado",
+                    Toast.LENGTH_SHORT
+                ).show()
             }
         )
     }
 
     if (showVerifyPin) {
         PinVerifyDialog(
-            onCancel = { showVerifyPin = false },
-            onResult = { ok ->
+            onCancel = {
                 showVerifyPin = false
-                if (ok) {
+                adminTarget =
+                    AdminTarget.None
+            },
+            onResult = { correct ->
+                showVerifyPin = false
+
+                if (correct) {
                     when (adminTarget) {
-                        AdminTarget.Menu -> menuOpen = true
-                        AdminTarget.TechPanel -> ctx.startActivity(
-                            Intent(ctx, AdminUnlockActivity::class.java)
-                        )
-                        else -> {}
+                        AdminTarget.Menu -> {
+                            menuOpen = true
+                        }
+
+                        AdminTarget.TechPanel -> {
+                            context.startActivity(
+                                Intent(
+                                    context,
+                                    AdminUnlockActivity::class.java
+                                )
+                            )
+                        }
+
+                        AdminTarget.None -> Unit
                     }
                 } else {
-                    Toast.makeText(ctx, "PIN incorrecto", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(
+                        context,
+                        "PIN incorrecto",
+                        Toast.LENGTH_SHORT
+                    ).show()
                 }
-                adminTarget = AdminTarget.None
+
+                adminTarget =
+                    AdminTarget.None
             }
         )
     }
@@ -326,93 +610,796 @@ private fun PortalScreen() {
     if (showTitleDialog) {
         TitleDialog(
             initial = title,
-            onCancel = { showTitleDialog = false },
+            onCancel = {
+                showTitleDialog = false
+            },
             onSave = { newTitle ->
-                Prefs.saveTitle(ctx, newTitle.trim())
-                title = Prefs.loadTitle(ctx) ?: "GVAM MDM"
+                Prefs.saveTitle(
+                    context,
+                    newTitle.trim()
+                )
+
+                title =
+                    Prefs.loadTitle(context)
+                        ?: "GVAM MDM"
+
                 showTitleDialog = false
             }
         )
     }
 }
 
-/* ------------------- TopBar + Menú anclado (bordes 16.dp) ------------------- */
+/* =========================================================
+   CUADRÍCULA
+   ========================================================= */
 
 @Composable
-private fun TopBar(
+private fun AppsGrid(
+    apps: List<AppEntry>,
+    padding: PaddingValues,
+    onAppClick: (AppEntry) -> Unit
+) {
+    val configuration =
+        LocalConfiguration.current
+
+    val widthDp =
+        configuration.screenWidthDp
+
+    val columns =
+        when {
+            widthDp >= 840 -> 4
+            widthDp >= 600 -> 3
+
+            configuration.orientation ==
+                Configuration.ORIENTATION_LANDSCAPE &&
+                widthDp >= 480 -> 3
+
+            else -> 2
+        }
+
+    LazyVerticalGrid(
+        columns =
+            GridCells.Fixed(columns),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(padding)
+            .padding(
+                horizontal = 12.dp,
+                vertical = 14.dp
+            ),
+        verticalArrangement =
+            Arrangement.spacedBy(12.dp),
+        horizontalArrangement =
+            Arrangement.spacedBy(12.dp),
+        contentPadding =
+            PaddingValues(bottom = 20.dp)
+    ) {
+        gridItems(
+            items = apps,
+            key = {
+                it.packageName
+            }
+        ) { entry ->
+            AppGridCard(
+                entry = entry,
+                onClick = {
+                    onAppClick(entry)
+                }
+            )
+        }
+    }
+}
+
+/* =========================================================
+   LISTA
+   ========================================================= */
+
+@Composable
+private fun AppsList(
+    apps: List<AppEntry>,
+    padding: PaddingValues,
+    onAppClick: (AppEntry) -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(padding)
+            .padding(
+                horizontal = 12.dp,
+                vertical = 14.dp
+            ),
+        verticalArrangement =
+            Arrangement.spacedBy(10.dp),
+        contentPadding =
+            PaddingValues(bottom = 20.dp)
+    ) {
+        lazyItems(
+            items = apps,
+            key = {
+                it.packageName
+            }
+        ) { entry ->
+            AppListRow(
+                entry = entry,
+                onClick = {
+                    onAppClick(entry)
+                }
+            )
+        }
+    }
+}
+
+/* =========================================================
+   TARJETA DE CUADRÍCULA
+   ========================================================= */
+
+@Composable
+private fun AppGridCard(
+    entry: AppEntry,
+    onClick: () -> Unit
+) {
+    val context =
+        LocalContext.current
+
+    val packageManager =
+        context.packageManager
+
+    val icon =
+        remember(entry.packageName) {
+            loadAppIconImage(
+                packageManager =
+                    packageManager,
+                packageName =
+                    entry.packageName
+            )
+        }
+
+    val shape =
+        RoundedCornerShape(24.dp)
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(
+                min = 150.dp,
+                max = 172.dp
+            )
+            .clip(shape)
+            .clickable(
+                onClick = onClick
+            )
+            .animateContentSize(),
+        shape = shape,
+        color =
+            Color(0xE6FFFFFF),
+        contentColor =
+            Color(0xFF1C1B1F),
+        tonalElevation = 3.dp,
+        shadowElevation = 2.dp,
+        border = BorderStroke(
+            width = 1.dp,
+            color =
+                Color.White.copy(
+                    alpha = 0.55f
+                )
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(
+                    horizontal = 12.dp,
+                    vertical = 16.dp
+                ),
+            horizontalAlignment =
+                Alignment.CenterHorizontally,
+            verticalArrangement =
+                Arrangement.Center
+        ) {
+            AppIcon(
+                icon = icon,
+                label = entry.label,
+                size = 72.dp
+            )
+
+            Spacer(
+                modifier =
+                    Modifier.height(12.dp)
+            )
+
+            Text(
+                text = entry.label,
+                style =
+                    MaterialTheme
+                        .typography
+                        .titleMedium,
+                fontWeight =
+                    FontWeight.SemiBold,
+                textAlign =
+                    TextAlign.Center,
+                maxLines = 2,
+                overflow =
+                    TextOverflow.Ellipsis,
+                lineHeight = 19.sp,
+                color =
+                    Color(0xFF252327)
+            )
+        }
+    }
+}
+
+/* =========================================================
+   FILA DE LISTA
+   ========================================================= */
+
+@Composable
+private fun AppListRow(
+    entry: AppEntry,
+    onClick: () -> Unit
+) {
+    val context =
+        LocalContext.current
+
+    val packageManager =
+        context.packageManager
+
+    val icon =
+        remember(entry.packageName) {
+            loadAppIconImage(
+                packageManager =
+                    packageManager,
+                packageName =
+                    entry.packageName
+            )
+        }
+
+    val shape =
+        RoundedCornerShape(20.dp)
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(
+                min = 82.dp
+            )
+            .clip(shape)
+            .clickable(
+                onClick = onClick
+            ),
+        shape = shape,
+        color =
+            Color(0xE6FFFFFF),
+        tonalElevation = 2.dp,
+        shadowElevation = 1.dp,
+        border = BorderStroke(
+            width = 1.dp,
+            color =
+                Color.White.copy(
+                    alpha = 0.5f
+                )
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(
+                    horizontal = 16.dp,
+                    vertical = 12.dp
+                ),
+            verticalAlignment =
+                Alignment.CenterVertically
+        ) {
+            AppIcon(
+                icon = icon,
+                label = entry.label,
+                size = 54.dp
+            )
+
+            Spacer(
+                modifier =
+                    Modifier.width(16.dp)
+            )
+
+            Text(
+                text = entry.label,
+                modifier =
+                    Modifier.weight(1f),
+                style =
+                    MaterialTheme
+                        .typography
+                        .titleMedium,
+                fontWeight =
+                    FontWeight.SemiBold,
+                color =
+                    Color(0xFF252327),
+                maxLines = 2,
+                overflow =
+                    TextOverflow.Ellipsis
+            )
+
+            Text(
+                text = "›",
+                fontSize = 34.sp,
+                fontWeight =
+                    FontWeight.Light,
+                color =
+                    Color(0xFF6B696D)
+            )
+        }
+    }
+}
+
+/* =========================================================
+   ICONO DE APLICACIÓN
+   ========================================================= */
+
+@Composable
+private fun AppIcon(
+    icon: ImageBitmap?,
+    label: String,
+    size: Dp
+) {
+    if (icon != null) {
+        Image(
+            bitmap = icon,
+            contentDescription = label,
+            modifier =
+                Modifier.size(size),
+            contentScale =
+                ContentScale.Fit,
+            filterQuality =
+                FilterQuality.High
+        )
+    } else {
+        Box(
+            modifier = Modifier
+                .size(size)
+                .clip(
+                    RoundedCornerShape(
+                        18.dp
+                    )
+                )
+                .background(
+                    MaterialTheme
+                        .colorScheme
+                        .primaryContainer
+                ),
+            contentAlignment =
+                Alignment.Center
+        ) {
+            Text(
+                text =
+                    label
+                        .trim()
+                        .firstOrNull()
+                        ?.uppercase()
+                        ?: "?",
+                style =
+                    MaterialTheme
+                        .typography
+                        .headlineMedium,
+                fontWeight =
+                    FontWeight.Bold,
+                color =
+                    MaterialTheme
+                        .colorScheme
+                        .onPrimaryContainer
+            )
+        }
+    }
+}
+
+/* =========================================================
+   UNA SOLA APLICACIÓN
+   ========================================================= */
+
+@Composable
+private fun SingleAppSpot(
+    entry: AppEntry,
+    padding: PaddingValues,
+    onClick: () -> Unit
+) {
+    val context =
+        LocalContext.current
+
+    val packageManager =
+        context.packageManager
+
+    val icon =
+        remember(entry.packageName) {
+            loadAppIconImage(
+                packageManager =
+                    packageManager,
+                packageName =
+                    entry.packageName
+            )
+        }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(padding)
+            .padding(24.dp),
+        contentAlignment =
+            Alignment.Center
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(
+                    max = 330.dp
+                )
+                .clip(
+                    RoundedCornerShape(
+                        30.dp
+                    )
+                )
+                .clickable(
+                    onClick = onClick
+                ),
+            shape =
+                RoundedCornerShape(30.dp),
+            color =
+                Color(0xEFFFFFFF),
+            tonalElevation = 5.dp,
+            shadowElevation = 4.dp,
+            border = BorderStroke(
+                width = 1.dp,
+                color =
+                    Color.White.copy(
+                        alpha = 0.65f
+                    )
+            )
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        horizontal = 24.dp,
+                        vertical = 34.dp
+                    ),
+                horizontalAlignment =
+                    Alignment.CenterHorizontally
+            ) {
+                AppIcon(
+                    icon = icon,
+                    label = entry.label,
+                    size = 104.dp
+                )
+
+                Spacer(
+                    modifier =
+                        Modifier.height(22.dp)
+                )
+
+                Text(
+                    text = entry.label,
+                    style =
+                        MaterialTheme
+                            .typography
+                            .headlineSmall,
+                    fontWeight =
+                        FontWeight.Bold,
+                    textAlign =
+                        TextAlign.Center,
+                    color =
+                        Color(0xFF252327),
+                    maxLines = 2,
+                    overflow =
+                        TextOverflow.Ellipsis
+                )
+
+                Spacer(
+                    modifier =
+                        Modifier.height(20.dp)
+                )
+
+                FilledTonalButton(
+                    onClick = onClick,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp),
+                    shape =
+                        RoundedCornerShape(
+                            18.dp
+                        )
+                ) {
+                    Text(
+                        text =
+                            "Abrir aplicación",
+                        fontWeight =
+                            FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+    }
+}
+
+/* =========================================================
+   ESTADO VACÍO
+   ========================================================= */
+
+@Composable
+private fun EmptyAppsState(
+    padding: PaddingValues,
+    onConfigure: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(padding)
+            .padding(24.dp),
+        contentAlignment =
+            Alignment.Center
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(
+                    max = 380.dp
+                ),
+            shape =
+                RoundedCornerShape(28.dp),
+            color =
+                Color(0xEFFFFFFF),
+            tonalElevation = 4.dp,
+            shadowElevation = 3.dp
+        ) {
+            Column(
+                modifier =
+                    Modifier.padding(28.dp),
+                horizontalAlignment =
+                    Alignment.CenterHorizontally
+            ) {
+                Surface(
+                    modifier =
+                        Modifier.size(76.dp),
+                    shape = CircleShape,
+                    color =
+                        MaterialTheme
+                            .colorScheme
+                            .primaryContainer
+                ) {
+                    Box(
+                        contentAlignment =
+                            Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector =
+                                Icons.Filled.Apps,
+                            contentDescription =
+                                null,
+                            modifier =
+                                Modifier.size(
+                                    38.dp
+                                ),
+                            tint =
+                                MaterialTheme
+                                    .colorScheme
+                                    .onPrimaryContainer
+                        )
+                    }
+                }
+
+                Spacer(
+                    modifier =
+                        Modifier.height(20.dp)
+                )
+
+                Text(
+                    text =
+                        "No hay aplicaciones configuradas",
+                    style =
+                        MaterialTheme
+                            .typography
+                            .titleLarge,
+                    fontWeight =
+                        FontWeight.Bold,
+                    textAlign =
+                        TextAlign.Center,
+                    color =
+                        Color(0xFF252327)
+                )
+
+                Spacer(
+                    modifier =
+                        Modifier.height(10.dp)
+                )
+
+                Text(
+                    text =
+                        "Accede al menú de administración para seleccionar las aplicaciones que aparecerán en este dispositivo.",
+                    style =
+                        MaterialTheme
+                            .typography
+                            .bodyMedium,
+                    textAlign =
+                        TextAlign.Center,
+                    color =
+                        Color(0xFF656267)
+                )
+
+                Spacer(
+                    modifier =
+                        Modifier.height(22.dp)
+                )
+
+                Button(
+                    onClick = onConfigure,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape =
+                        RoundedCornerShape(
+                            18.dp
+                        )
+                ) {
+                    Icon(
+                        imageVector =
+                            Icons.Filled.Settings,
+                        contentDescription =
+                            null
+                    )
+
+                    Spacer(
+                        modifier =
+                            Modifier.width(8.dp)
+                    )
+
+                    Text(
+                        "Configurar aplicaciones"
+                    )
+                }
+            }
+        }
+    }
+}
+
+/* =========================================================
+   BARRA SUPERIOR
+   ========================================================= */
+
+@Composable
+private fun PortalTopBar(
     title: String,
     gridView: Boolean,
     onToggleView: () -> Unit,
     menuOpen: Boolean,
     onOpenMenu: () -> Unit,
     onDismissMenu: () -> Unit,
-    menuContent: @Composable ColumnScope.() -> Unit
+    menuContent:
+        @Composable ColumnScope.() -> Unit
 ) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .statusBarsPadding()
-            .padding(horizontal = 10.dp)
-            .height(66.dp)
-            .clip(MaterialTheme.shapes.extraLarge),
-        // ↑ más opacidad en la barra
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.28f)
+            .padding(
+                horizontal = 10.dp,
+                vertical = 4.dp
+            )
+            .height(68.dp),
+        shape =
+            RoundedCornerShape(26.dp),
+        color =
+            Color(0xD9344E25),
+        contentColor =
+            Color.White,
+        tonalElevation = 3.dp,
+        shadowElevation = 2.dp,
+        border = BorderStroke(
+            width = 1.dp,
+            color =
+                Color.White.copy(
+                    alpha = 0.18f
+                )
+        )
     ) {
         Row(
-            Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(
+                    horizontal = 10.dp
+                ),
+            verticalAlignment =
+                Alignment.CenterVertically
         ) {
-            // Cambiar vista
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(MaterialTheme.shapes.small)
-                    .clickable { onToggleView() },
-                contentAlignment = Alignment.Center
+            IconButton(
+                onClick = onToggleView,
+                modifier =
+                    Modifier.size(48.dp)
             ) {
                 Icon(
-                    imageVector = if (gridView) Icons.Filled.ViewList else Icons.Filled.ViewModule,
-                    contentDescription = "Cambiar vista",
+                    imageVector =
+                        if (gridView) {
+                            Icons.Filled.ViewList
+                        } else {
+                            Icons.Filled.ViewModule
+                        },
+                    contentDescription =
+                        if (gridView) {
+                            "Cambiar a vista de lista"
+                        } else {
+                            "Cambiar a vista de cuadrícula"
+                        },
+                    modifier =
+                        Modifier.size(27.dp),
                     tint = Color.White
                 )
             }
 
-            Spacer(Modifier.width(8.dp))
-
             Text(
                 text = title,
-                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(
+                        horizontal = 8.dp
+                    ),
+                style =
+                    MaterialTheme
+                        .typography
+                        .titleLarge,
+                fontWeight =
+                    FontWeight.Bold,
+                textAlign =
+                    TextAlign.Center,
                 color = Color.White,
-                modifier = Modifier.weight(1f),
-                textAlign = TextAlign.Center
+                maxLines = 1,
+                overflow =
+                    TextOverflow.Ellipsis
             )
 
-            // Botón ⋮ con menú anclado y esquinas redondeadas
             Box(
-                modifier = Modifier
-                    .wrapContentSize(Alignment.TopEnd)
-                    .clip(MaterialTheme.shapes.small)
-                    .clickable { onOpenMenu() },
-                contentAlignment = Alignment.Center
+                modifier =
+                    Modifier.wrapContentSize(
+                        Alignment.TopEnd
+                    )
             ) {
-                Icon(
-                    imageVector = Icons.Filled.MoreVert,
-                    contentDescription = "Menú",
-                    tint = Color.White,
-                    modifier = Modifier.size(32.dp)
-                )
+                IconButton(
+                    onClick = onOpenMenu,
+                    modifier =
+                        Modifier.size(48.dp)
+                ) {
+                    Icon(
+                        imageVector =
+                            Icons.Filled.MoreVert,
+                        contentDescription =
+                            "Abrir menú",
+                        modifier =
+                            Modifier.size(28.dp),
+                        tint =
+                            Color.White
+                    )
+                }
 
-                val menuShape = RoundedCornerShape(16.dp)
                 MaterialTheme(
-                    colorScheme = MaterialTheme.colorScheme,
-                    typography  = MaterialTheme.typography,
-                    shapes      = MaterialTheme.shapes.copy(extraSmall = menuShape)
+                    shapes =
+                        MaterialTheme
+                            .shapes
+                            .copy(
+                                extraSmall =
+                                    RoundedCornerShape(
+                                        20.dp
+                                    )
+                            )
                 ) {
                     DropdownMenu(
                         expanded = menuOpen,
-                        onDismissRequest = onDismissMenu,
-                        offset = DpOffset(x = (-8).dp, y = 0.dp),
-                        content = menuContent
+                        onDismissRequest =
+                            onDismissMenu,
+                        offset =
+                            DpOffset(
+                                x = (-4).dp,
+                                y = 4.dp
+                            ),
+                        modifier =
+                            Modifier.widthIn(
+                                min = 250.dp,
+                                max = 310.dp
+                            ),
+                        content =
+                            menuContent
                     )
                 }
             }
@@ -423,186 +1410,301 @@ private fun TopBar(
 @Composable
 private fun MenuEntry(
     text: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon:
+        androidx.compose.ui.graphics.vector.ImageVector,
     onClick: () -> Unit
 ) {
     DropdownMenuItem(
-        text = { Text(text) },
-        leadingIcon = { Icon(icon, contentDescription = null) },
-        onClick = onClick
+        text = {
+            Text(
+                text = text,
+                maxLines = 1,
+                overflow =
+                    TextOverflow.Ellipsis
+            )
+        },
+        leadingIcon = {
+            Icon(
+                imageVector = icon,
+                contentDescription = null
+            )
+        },
+        onClick = onClick,
+        contentPadding =
+            PaddingValues(
+                horizontal = 18.dp,
+                vertical = 4.dp
+            )
     )
 }
 
-/* ------------------- Tarjetas de apps (solo icono) ------------------- */
-
-@Composable
-private fun AppCard(
-    entry: AppEntry,
-    onClick: () -> Unit
-) {
-    val ctx = LocalContext.current
-    val pm = ctx.packageManager
-    val icon = remember(entry.packageName) { loadAppIconImage(ctx, pm, entry.packageName) }
-    val shape = MaterialTheme.shapes.extraLarge
-
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .aspectRatio(1.15f)
-            .clip(shape)
-            .clickable { onClick() },
-        // ↑ más opacidad en las tarjetas
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.28f),
-        shape = shape
-    ) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            if (icon != null) {
-                Image(
-                    bitmap = icon,
-                    contentDescription = entry.label,
-                    modifier = Modifier.size(96.dp),
-                    contentScale = ContentScale.Fit,
-                    filterQuality = FilterQuality.Medium
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun SingleAppSpot(
-    entry: AppEntry,
-    padding: PaddingValues,
-    onClick: () -> Unit
-) {
-    val ctx = LocalContext.current
-    val pm = ctx.packageManager
-    val icon = remember(entry.packageName) { loadAppIconImage(ctx, pm, entry.packageName) }
-    val shape = MaterialTheme.shapes.extraLarge
-
-    Box(
-        Modifier.fillMaxSize().padding(padding),
-        contentAlignment = Alignment.Center
-    ) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth(0.6f)
-                .aspectRatio(1.1f)
-                .clip(shape)
-                .clickable { onClick() },
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.28f),
-            shape = shape
-        ) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                if (icon != null) {
-                    Image(
-                        bitmap = icon,
-                        contentDescription = entry.label,
-                        modifier = Modifier.size(96.dp),
-                        contentScale = ContentScale.Fit,
-                        filterQuality = FilterQuality.Medium
-                    )
-                }
-            }
-        }
-    }
-}
-
-/* ------------------- Fondo con scrim ------------------- */
+/* =========================================================
+   FONDO
+   ========================================================= */
 
 @Composable
 private fun BackgroundLayer() {
-    Box(Modifier.fillMaxSize()) {
+    Box(
+        modifier =
+            Modifier.fillMaxSize()
+    ) {
         Image(
-            painter = painterResource(R.drawable.kiosk_default_bg),
+            painter = painterResource(
+                id =
+                    R.drawable.kiosk_default_bg
+            ),
             contentDescription = null,
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop
+            modifier =
+                Modifier.fillMaxSize(),
+            contentScale =
+                ContentScale.Crop
         )
-        // Scrim suave para “subir opacidad” y mejorar contraste
+
         Box(
-            Modifier
+            modifier = Modifier
                 .fillMaxSize()
-                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.10f))
+                .background(
+                    Color.Black.copy(
+                        alpha = 0.12f
+                    )
+                )
         )
     }
 }
 
-/* ------------------- Diálogos ------------------- */
+/* =========================================================
+   DIÁLOGO CREAR PIN
+   ========================================================= */
 
 @Composable
 private fun PinCreateDialog(
     onCancel: () -> Unit,
     onConfirm: (String) -> Unit
 ) {
-    var p1 by rememberSaveable { mutableStateOf("") }
-    var p2 by rememberSaveable { mutableStateOf("") }
-    val ok = p1.length in 4..8 && p1 == p2
+    var firstPin by rememberSaveable {
+        mutableStateOf("")
+    }
+
+    var repeatedPin by rememberSaveable {
+        mutableStateOf("")
+    }
+
+    val valid =
+        firstPin.length in 4..8 &&
+            firstPin == repeatedPin
 
     AlertDialog(
-        onDismissRequest = onCancel,
-        title = { Text("Crear / Cambiar PIN (4–8 dígitos)") },
+        onDismissRequest =
+            onCancel,
+        title = {
+            Text(
+                "Crear PIN de administrador"
+            )
+        },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = p1,
-                    onValueChange = { if (it.length <= 8) p1 = it.filter(Char::isDigit) },
-                    singleLine = true,
-                    label = { Text("PIN") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                    visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth()
+            Column(
+                verticalArrangement =
+                    Arrangement.spacedBy(
+                        10.dp
+                    )
+            ) {
+                Text(
+                    text =
+                        "Introduce un código de entre 4 y 8 dígitos.",
+                    style =
+                        MaterialTheme
+                            .typography
+                            .bodyMedium
                 )
+
                 OutlinedTextField(
-                    value = p2,
-                    onValueChange = { if (it.length <= 8) p2 = it.filter(Char::isDigit) },
+                    value =
+                        firstPin,
+                    onValueChange = { value ->
+                        firstPin =
+                            value
+                                .filter(
+                                    Char::isDigit
+                                )
+                                .take(8)
+                    },
                     singleLine = true,
-                    label = { Text("Repite PIN") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                    visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth()
+                    label = {
+                        Text("PIN")
+                    },
+                    keyboardOptions =
+                        KeyboardOptions(
+                            keyboardType =
+                                KeyboardType
+                                    .NumberPassword
+                        ),
+                    visualTransformation =
+                        PasswordVisualTransformation(),
+                    modifier =
+                        Modifier.fillMaxWidth()
                 )
-                if (p1.isNotEmpty() && p2.isNotEmpty() && !ok) {
-                    Text("Los PIN no coinciden o longitud inválida", color = MaterialTheme.colorScheme.error)
+
+                OutlinedTextField(
+                    value =
+                        repeatedPin,
+                    onValueChange = { value ->
+                        repeatedPin =
+                            value
+                                .filter(
+                                    Char::isDigit
+                                )
+                                .take(8)
+                    },
+                    singleLine = true,
+                    label = {
+                        Text(
+                            "Repetir PIN"
+                        )
+                    },
+                    keyboardOptions =
+                        KeyboardOptions(
+                            keyboardType =
+                                KeyboardType
+                                    .NumberPassword
+                        ),
+                    visualTransformation =
+                        PasswordVisualTransformation(),
+                    modifier =
+                        Modifier.fillMaxWidth()
+                )
+
+                if (
+                    firstPin.isNotEmpty() &&
+                    repeatedPin.isNotEmpty() &&
+                    !valid
+                ) {
+                    Text(
+                        text =
+                            "Los PIN no coinciden o la longitud no es válida.",
+                        color =
+                            MaterialTheme
+                                .colorScheme
+                                .error
+                    )
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { if (ok) onConfirm(p1) }, enabled = ok) { Text("Guardar") } },
-        dismissButton = { TextButton(onClick = onCancel) { Text("Cancelar") } },
-        properties = DialogProperties(dismissOnClickOutside = false)
+        confirmButton = {
+            TextButton(
+                enabled = valid,
+                onClick = {
+                    if (valid) {
+                        onConfirm(firstPin)
+                    }
+                }
+            ) {
+                Text("Guardar")
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onCancel
+            ) {
+                Text("Cancelar")
+            }
+        },
+        properties =
+            DialogProperties(
+                dismissOnClickOutside =
+                    false
+            )
     )
 }
+
+/* =========================================================
+   DIÁLOGO VERIFICAR PIN
+   ========================================================= */
 
 @Composable
 private fun PinVerifyDialog(
     onCancel: () -> Unit,
     onResult: (Boolean) -> Unit
 ) {
-    val ctx = LocalContext.current
-    var pin by rememberSaveable { mutableStateOf("") }
-    val ok = pin.length in 4..8
+    val context =
+        LocalContext.current
+
+    var pin by rememberSaveable {
+        mutableStateOf("")
+    }
+
+    val valid =
+        pin.length in 4..8
 
     AlertDialog(
-        onDismissRequest = onCancel,
-        title = { Text("PIN de administrador") },
+        onDismissRequest =
+            onCancel,
+        title = {
+            Text(
+                "Acceso de administrador"
+            )
+        },
         text = {
             OutlinedTextField(
                 value = pin,
-                onValueChange = { if (it.length <= 8) pin = it.filter(Char::isDigit) },
+                onValueChange = { value ->
+                    pin =
+                        value
+                            .filter(
+                                Char::isDigit
+                            )
+                            .take(8)
+                },
                 singleLine = true,
-                label = { Text("Introduce el PIN") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                visualTransformation = PasswordVisualTransformation(),
-                modifier = Modifier.fillMaxWidth()
+                label = {
+                    Text(
+                        "PIN de administrador"
+                    )
+                },
+                keyboardOptions =
+                    KeyboardOptions(
+                        keyboardType =
+                            KeyboardType
+                                .NumberPassword
+                    ),
+                visualTransformation =
+                    PasswordVisualTransformation(),
+                modifier =
+                    Modifier.fillMaxWidth()
             )
         },
         confirmButton = {
-            TextButton(enabled = ok, onClick = { onResult(Pin.verifyPin(ctx, pin)) }) { Text("Aceptar") }
+            TextButton(
+                enabled = valid,
+                onClick = {
+                    onResult(
+                        Pin.verifyPin(
+                            context,
+                            pin
+                        )
+                    )
+                }
+            ) {
+                Text("Aceptar")
+            }
         },
-        dismissButton = { TextButton(onClick = onCancel) { Text("Cancelar") } },
-        properties = DialogProperties(dismissOnClickOutside = false)
+        dismissButton = {
+            TextButton(
+                onClick = onCancel
+            ) {
+                Text("Cancelar")
+            }
+        },
+        properties =
+            DialogProperties(
+                dismissOnClickOutside =
+                    false
+            )
     )
 }
+
+/* =========================================================
+   DIÁLOGO CAMBIAR TÍTULO
+   ========================================================= */
 
 @Composable
 private fun TitleDialog(
@@ -610,51 +1712,180 @@ private fun TitleDialog(
     onCancel: () -> Unit,
     onSave: (String) -> Unit
 ) {
-    var value by rememberSaveable { mutableStateOf(initial) }
+    var value by rememberSaveable {
+        mutableStateOf(initial)
+    }
 
     AlertDialog(
-        onDismissRequest = onCancel,
-        title = { Text("Cambiar título") },
+        onDismissRequest =
+            onCancel,
+        title = {
+            Text(
+                "Cambiar título"
+            )
+        },
         text = {
             OutlinedTextField(
                 value = value,
-                onValueChange = { value = it },
+                onValueChange = {
+                    value =
+                        it.take(40)
+                },
                 singleLine = true,
-                label = { Text("Título del portal") },
-                modifier = Modifier.fillMaxWidth()
+                label = {
+                    Text(
+                        "Título del launcher"
+                    )
+                },
+                supportingText = {
+                    Text(
+                        "${value.length}/40"
+                    )
+                },
+                modifier =
+                    Modifier.fillMaxWidth()
             )
         },
         confirmButton = {
-            // ← PERMITIR GUARDAR SIEMPRE (aunque esté vacío)
-            TextButton(onClick = { onSave(value) }) { Text("Guardar") }
+            TextButton(
+                onClick = {
+                    onSave(value)
+                }
+            ) {
+                Text("Guardar")
+            }
         },
-        dismissButton = { TextButton(onClick = onCancel) { Text("Cancelar") } },
-        properties = DialogProperties(dismissOnClickOutside = false)
+        dismissButton = {
+            TextButton(
+                onClick = onCancel
+            ) {
+                Text("Cancelar")
+            }
+        },
+        properties =
+            DialogProperties(
+                dismissOnClickOutside =
+                    false
+            )
     )
 }
 
-/* ------------------- Datos ------------------- */
+/* =========================================================
+   ABRIR APLICACIÓN
+   ========================================================= */
 
-private fun loadSelectedEntries(ctx: Context): List<AppEntry> {
-    val pm = ctx.packageManager
-    val selected = Prefs.loadSelectedPackages(ctx)
-    return selected.map { pkg ->
-        val label = try {
-            val ai = pm.getApplicationInfo(pkg, 0)
-            pm.getApplicationLabel(ai).toString()
-        } catch (_: Exception) { pkg }
-        AppEntry(pkg, label)
+private fun launchSelectedApp(
+    context: Context,
+    packageManager: PackageManager,
+    entry: AppEntry
+) {
+    val launchIntent =
+        packageManager
+            .getLaunchIntentForPackage(
+                entry.packageName
+            )
+
+    if (launchIntent == null) {
+        Toast.makeText(
+            context,
+            "${entry.label} no tiene una actividad de inicio disponible",
+            Toast.LENGTH_LONG
+        ).show()
+
+        return
+    }
+
+    /*
+     * getLaunchIntentForPackage suele incluir NEW_TASK.
+     * Lo eliminamos para abrir la aplicación desde la tarea
+     * actual del launcher y poder regresar mediante Atrás.
+     */
+    launchIntent.flags =
+        launchIntent.flags and
+            Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+
+    launchIntent.addFlags(
+        Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+    )
+
+    runCatching {
+        context.startActivity(
+            launchIntent
+        )
+    }.onFailure { error ->
+        Toast.makeText(
+            context,
+            "No se pudo abrir ${entry.label}: " +
+                (error.message ?: "error desconocido"),
+            Toast.LENGTH_LONG
+        ).show()
     }
 }
 
-/** Carga icono de app como ImageBitmap (128×128). */
+/* =========================================================
+   CARGAR APLICACIONES
+   ========================================================= */
+
+private fun loadSelectedEntries(
+    context: Context
+): List<AppEntry> {
+    val packageManager =
+        context.packageManager
+
+    return Prefs
+        .loadSelectedPackages(context)
+        .map { packageName ->
+            val label =
+                try {
+                    val applicationInfo =
+                        packageManager
+                            .getApplicationInfo(
+                                packageName,
+                                0
+                            )
+
+                    packageManager
+                        .getApplicationLabel(
+                            applicationInfo
+                        )
+                        .toString()
+                } catch (_: Exception) {
+                    packageName
+                }
+
+            AppEntry(
+                packageName,
+                label
+            )
+        }
+        .sortedBy {
+            it.label.lowercase()
+        }
+}
+
+/* =========================================================
+   CARGAR ICONOS
+   ========================================================= */
+
 private fun loadAppIconImage(
-    ctx: Context,
-    pm: PackageManager,
-    pkg: String
+    packageManager: PackageManager,
+    packageName: String
 ) = runCatching {
-    val d = pm.getApplicationIcon(pkg)
-    val bmp = (d as? BitmapDrawable)?.bitmap
-        ?: d.toBitmap(128, 128, Bitmap.Config.ARGB_8888)
-    bmp.asImageBitmap()
+    val drawable =
+        packageManager
+            .getApplicationIcon(
+                packageName
+            )
+
+    val bitmap =
+        (drawable as? BitmapDrawable)
+            ?.bitmap
+            ?: drawable.toBitmap(
+                width = 160,
+                height = 160,
+                config =
+                    Bitmap.Config.ARGB_8888
+            )
+
+    bitmap.asImageBitmap()
 }.getOrNull()
