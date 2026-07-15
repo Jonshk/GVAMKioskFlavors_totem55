@@ -1,0 +1,868 @@
+﻿ARCHIVOS ENCONTRADOS:
+
+
+============================================================
+ARCHIVO: D:\GVAMKioskFlavors_totem55\app\src\main\java\com\gvam\kioskportal\ui\AboutActivity.kt
+============================================================
+
+package com.gvam.kioskportal.ui
+
+import android.os.Build
+import android.os.Bundle
+import android.provider.Settings
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.core.content.pm.PackageInfoCompat
+import com.gvam.kioskportal.util.Prefs
+import com.gvam.kioskportal.util.Pin
+
+@OptIn(ExperimentalMaterial3Api::class)
+class AboutActivity : ComponentActivity() {
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        val initialTitle         = Prefs.loadTitle(this) ?: "Portal"
+        val initialDeviceNumber  = Prefs.loadDeviceNumber(this).orEmpty()
+        val hideSettingsInit     = Prefs.isSettingsHidden(this)
+        val androidId            = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
+
+        // Version (compatible minSdk 26)
+        val pInfo    = runCatching { packageManager.getPackageInfo(packageName, 0) }.getOrNull()
+        val verName  = pInfo?.versionName ?: "â€”"
+        val verCode  = pInfo?.let { PackageInfoCompat.getLongVersionCode(it) } ?: 0L
+
+        setContent {
+            MaterialTheme {
+                val ctx = LocalContext.current
+                var deviceNumber by rememberSaveable { mutableStateOf(initialDeviceNumber) }
+                var hideSettings by rememberSaveable { mutableStateOf(hideSettingsInit) }
+                var showPinDialog by rememberSaveable { mutableStateOf(false) }
+                val scroll = rememberScrollState()
+
+                Scaffold(
+                    topBar = {
+                        TopAppBar(
+                            title = { Text("Acerca de / Dispositivo", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            navigationIcon = { TextButton(onClick = { finish() }) { Text("AtrÃ¡s") } }
+                        )
+                    }
+                ) { padding ->
+                    Column(
+                        modifier = Modifier
+                            .padding(padding)
+                            .padding(16.dp)
+                            .fillMaxSize()
+                            .verticalScroll(scroll),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        // App
+                        Text(initialTitle, style = MaterialTheme.typography.headlineSmall)
+                        Text("VersiÃ³n: $verName ($verCode)")
+                        HorizontalDivider()
+
+                        // Dispositivo
+                        Text("Dispositivo", style = MaterialTheme.typography.titleMedium)
+                        InfoRow("Fabricante", Build.MANUFACTURER.orEmpty())
+                        InfoRow("Modelo", Build.MODEL.orEmpty())
+                        InfoRow("Android", "${Build.VERSION.RELEASE ?: "â€”"} (SDK ${Build.VERSION.SDK_INT})")
+                        InfoRow("ANDROID_ID", androidId)
+                        HorizontalDivider()
+
+                        // NÃºmero de dispositivo
+                        Text("NÃºmero de dispositivo", style = MaterialTheme.typography.titleMedium)
+                        OutlinedTextField(
+                            value = deviceNumber,
+                            onValueChange = { deviceNumber = it.take(32) },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("Ej.: KIOSK-001") },
+                            singleLine = true
+                        )
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            Button(onClick = { Prefs.saveDeviceNumber(ctx, deviceNumber.trim()) }) {
+                                Text("Guardar nÃºmero")
+                            }
+                        }
+                        HorizontalDivider()
+
+                        // Ocultar Ajustes
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Ocultar Ajustes de Android", style = MaterialTheme.typography.titleMedium)
+                                Text("Si se activa, la opciÃ³n de Ajustes se oculta del menÃº.")
+                            }
+                            Switch(checked = hideSettings, onCheckedChange = {
+                                hideSettings = it
+                                Prefs.setHideSettings(ctx, it)
+                            })
+                        }
+                        HorizontalDivider()
+
+                        // AdministraciÃ³n
+                        Text("AdministraciÃ³n", style = MaterialTheme.typography.titleMedium)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            Button(onClick = { showPinDialog = true }) { Text("Cambiar PIN") }
+                        }
+
+                        // Botonera inferior
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            OutlinedButton(onClick = { finish() }) { Text("Cerrar") }
+                            Spacer(Modifier.width(12.dp))
+                            Button(onClick = {
+                                Prefs.saveDeviceNumber(ctx, deviceNumber.trim())
+                                Prefs.setHideSettings(ctx, hideSettings)
+                                finish()
+                            }) { Text("Guardar") }
+                        }
+                    }
+                }
+
+                if (showPinDialog) {
+                    PinCreateDialog(
+                        onCancel = { showPinDialog = false },
+                        onConfirm = { newPin ->
+                            Pin.savePin(ctx, newPin)
+                            showPinDialog = false
+                            // No Toast aquÃ­: evitamos dependencia a Activity; Ãºsalo si quieres.
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+/* ---------- Helpers UI ---------- */
+
+@Composable
+private fun InfoRow(label: String, value: String) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, modifier = Modifier.widthIn(min = 120.dp).weight(0.4f))
+        Text(value, modifier = Modifier.weight(0.6f))
+    }
+}
+
+/* ---------- DiÃ¡logo Crear/Cambiar PIN ---------- */
+@Composable
+private fun PinCreateDialog(
+    onCancel: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var p1 by rememberSaveable { mutableStateOf("") }
+    var p2 by rememberSaveable { mutableStateOf("") }
+    val ok = p1.length in 4..8 && p1 == p2
+
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Crear / Cambiar PIN (4â€“8 dÃ­gitos)") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = p1,
+                    onValueChange = { if (it.length <= 8) p1 = it.filter(Char::isDigit) },
+                    singleLine = true,
+                    label = { Text("PIN") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = KeyboardType.NumberPassword
+                    )
+                )
+                OutlinedTextField(
+                    value = p2,
+                    onValueChange = { if (it.length <= 8) p2 = it.filter(Char::isDigit) },
+                    singleLine = true,
+                    label = { Text("Repite PIN") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = KeyboardType.NumberPassword
+                    )
+                )
+                if (p1.isNotEmpty() && p2.isNotEmpty() && !ok) {
+                    Text("Los PIN no coinciden o longitud invÃ¡lida", color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { if (ok) onConfirm(p1) }, enabled = ok) { Text("Guardar") }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) { Text("Cancelar") }
+        },
+        shape = MaterialTheme.shapes.large
+    )
+}
+
+============================================================
+ARCHIVO: D:\GVAMKioskFlavors_totem55\app\src\main\java\com\gvam\kioskportal\ui\AdminUnlockActivity.kt
+============================================================
+
+package com.gvam.kioskportal.ui
+
+import android.content.Intent
+import android.net.Uri
+import android.os.Bundle
+import android.provider.Settings
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import com.gvam.kioskportal.util.Prefs
+import com.gvam.kioskportal.util.Pin
+
+class AdminUnlockActivity : ComponentActivity() {
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        // âœ… Activar mantenimiento en cuanto entramos (evita rebote)
+        Prefs.setMaintenance(this, true)
+        runCatching { stopLockTask() }
+        WindowInsetsControllerCompat(window, window.decorView)
+            .show(WindowInsetsCompat.Type.systemBars())
+
+        // âœ… Si venimos del menÃº con destino concreto, ejecÃºtalo directo
+        when (intent.getStringExtra("target")) {
+            "settings" -> { openSystemSettings(); finish(); return }
+            "home"     -> { openHomePicker();    finish(); return }
+            "app_info" -> { openThisAppInfo();   finish(); return }
+            "wifi"     -> { openWifiSettings();  finish(); return }
+        }
+
+        // UI con PIN para accesos por hot-corner / atajos
+        setContent {
+            MaterialTheme {
+                Surface {
+                    AdminUnlockScreen(
+                        onCancel = { finish() },
+                        onOpenHomePicker = { openHomePicker(); finish() },
+                        onOpenSettings   = { openSystemSettings(); finish() },
+                        onOpenAppInfo    = { openThisAppInfo(); finish() },
+                    )
+                }
+            }
+        }
+    }
+
+    private fun openSystemSettings() {
+        val i = Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { startActivity(i) }
+    }
+
+    private fun openWifiSettings() {
+        val i = Intent(Settings.ACTION_WIFI_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { startActivity(i) }
+    }
+
+    private fun openHomePicker() {
+        val home = Intent(Settings.ACTION_HOME_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (home.resolveActivity(packageManager) != null) { runCatching { startActivity(home) }; return }
+        val defaults = Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (defaults.resolveActivity(packageManager) != null) { runCatching { startActivity(defaults) }; return }
+        openSystemSettings()
+    }
+
+    private fun openThisAppInfo() {
+        val uri = Uri.parse("package:$packageName")
+        val i = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { startActivity(i) }
+    }
+}
+
+@Composable
+private fun AdminUnlockScreen(
+    onCancel: () -> Unit,
+    onOpenHomePicker: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onOpenAppInfo: () -> Unit
+) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var pin by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    fun requireValidPin(doAfter: () -> Unit) {
+        if (!Pin.verifyPin(ctx, pin)) error = "PIN incorrecto" else { error = null; doAfter() }
+    }
+
+    Column(Modifier.fillMaxWidth().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("Acceso tÃ©cnico", style = MaterialTheme.typography.headlineSmall)
+        Spacer(Modifier.height(12.dp))
+        OutlinedTextField(
+            value = pin,
+            onValueChange = { pin = it.filter(Char::isDigit).take(8); error = null },
+            singleLine = true,
+            label = { Text("PIN de administrador") },
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+            modifier = Modifier.fillMaxWidth()
+        )
+        if (error != null) { Spacer(Modifier.height(8.dp)); Text(error!!, color = MaterialTheme.colorScheme.error) }
+        Spacer(Modifier.height(18.dp))
+        Button(onClick = { requireValidPin { onOpenHomePicker() } }, modifier = Modifier.fillMaxWidth()) {
+            Text("Abrir selector de Launcher")
+        }
+        Spacer(Modifier.height(10.dp))
+        OutlinedButton(onClick = { requireValidPin { onOpenSettings() } }, modifier = Modifier.fillMaxWidth()) {
+            Text("Abrir Ajustes del sistema")
+        }
+        OutlinedButton(onClick = { requireValidPin { onOpenAppInfo() } }, modifier = Modifier.fillMaxWidth()) {
+            Text("InformaciÃ³n de esta app")
+        }
+        Spacer(Modifier.height(14.dp))
+        TextButton(onClick = onCancel) { Text("Cancelar") }
+    }
+}
+
+============================================================
+ARCHIVO: D:\GVAMKioskFlavors_totem55\app\src\main\java\com\gvam\kioskportal\ui\AppPickerActivity.kt
+============================================================
+
+package com.gvam.kioskportal.ui
+
+import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
+import android.content.pm.ResolveInfo
+import android.graphics.Bitmap
+import android.graphics.drawable.BitmapDrawable
+import android.os.Build
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.core.graphics.drawable.toBitmap
+import com.gvam.kioskportal.R
+import com.gvam.kioskportal.util.Prefs
+
+/* ---------- Activity ---------- */
+
+class AppPickerActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent { PortalTheme { AppPickerScreen(onDone = { finish() }) } }
+    }
+}
+
+/* ---------- Datos + helpers ---------- */
+
+private data class AppInfo(
+    val packageName: String,
+    val label: String,
+    val icon: Bitmap,
+    val isSystem: Boolean
+)
+
+private enum class AppFilter { ALL, USER_ONLY }
+
+/** queryIntentActivities compatible con SDK 33+ */
+@Suppress("DEPRECATION")
+private fun PackageManager.queryIntentActivitiesCompat(
+    intent: Intent,
+    flags: Int = 0 // â† IMPORTANTE: sin MATCH_DEFAULT_ONLY
+): List<ResolveInfo> {
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        queryIntentActivities(intent, PackageManager.ResolveInfoFlags.of(flags.toLong()))
+    } else {
+        queryIntentActivities(intent, flags)
+    }
+}
+
+private fun isSystemApp(pm: PackageManager, pkg: String): Boolean = try {
+    val ai = pm.getApplicationInfo(pkg, 0)
+    (ai.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+} catch (_: Exception) { false }
+
+/** Carga TODAS las apps lanzables (usuario + sistema) */
+private fun loadAllLaunchableApps(pm: PackageManager): List<AppInfo> {
+    val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+    val list = pm.queryIntentActivitiesCompat(intent, 0) // â† sin filtro
+
+    val mapped = list.map { ri ->
+        val pkg = ri.activityInfo.packageName
+        val label = ri.loadLabel(pm)?.toString().orEmpty()
+        val drawable = ri.loadIcon(pm)
+        val bmp = (drawable as? BitmapDrawable)?.bitmap
+            ?: drawable.toBitmap(width = 128, height = 128)
+        AppInfo(
+            packageName = pkg,
+            label = label,
+            icon = bmp,
+            isSystem = isSystemApp(pm, pkg)
+        )
+    }
+
+    return mapped
+        .distinctBy { it.packageName }
+        .sortedWith(
+            compareBy<AppInfo> { it.isSystem }    // usuario primero
+                .thenBy { it.label.lowercase() }
+        )
+}
+
+/* ---------- UI ---------- */
+
+@Composable
+private fun AppPickerScreen(onDone: () -> Unit) {
+    val ctx = LocalContext.current
+    val pm = ctx.packageManager
+
+    // Lista de apps (recargable)
+    var allApps by remember { mutableStateOf(emptyList<AppInfo>()) }
+
+    // Carga inicial
+    LaunchedEffect(Unit) {
+        allApps = loadAllLaunchableApps(pm)
+    }
+
+    // Recarga automÃ¡tica al volver a primer plano
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val obs = object : DefaultLifecycleObserver {
+            override fun onResume(owner: LifecycleOwner) {
+                allApps = loadAllLaunchableApps(pm)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+
+    // Filtro (todas / solo usuario)
+    var filter by remember { mutableStateOf(AppFilter.ALL) }
+    val visibleApps = remember(allApps, filter) {
+        when (filter) {
+            AppFilter.ALL -> allApps
+            AppFilter.USER_ONLY -> allApps.filter { !it.isSystem }
+        }
+    }
+
+    // SelecciÃ³n persistente
+    val selected = remember {
+        mutableStateListOf<String>().apply { addAll(Prefs.loadSelectedPackages(ctx)) }
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        BackgroundLayer()  // recurso fijo de fondo
+
+        Scaffold(
+            containerColor = Color.Transparent,
+            topBar = {
+                GlassTopBar(
+                    title = "Seleccionar apps",
+                    count = selected.size,
+                    onClose = onDone,
+                    onSave = {
+                        Prefs.saveSelectedPackages(ctx, selected.toSet())
+                        onDone()
+                    },
+                    onRefresh = { allApps = loadAllLaunchableApps(pm) } // botÃ³n refrescar
+                )
+            },
+            contentWindowInsets = WindowInsets.safeDrawing
+        ) { padding ->
+            Column(
+                modifier = Modifier
+                    .padding(padding)
+                    .fillMaxSize()
+            ) {
+                // Filtros
+                FilterRow(current = filter, onChange = { filter = it })
+
+                // Grid de apps
+                val cfg = LocalConfiguration.current
+                val columns = when {
+                    cfg.screenWidthDp >= 1000 -> 5
+                    cfg.screenWidthDp >= 840  -> 4
+                    cfg.screenWidthDp >= 600  -> 3
+                    else -> 2
+                }
+
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(columns),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    items(visibleApps, key = { it.packageName }) { app ->
+                        val isSelected = app.packageName in selected
+                        AppPickTile(
+                            app = app,
+                            selected = isSelected,
+                            onClick = {
+                                if (isSelected) selected.remove(app.packageName)
+                                else selected.add(app.packageName)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/* ---------- Controles de cabecera y filtros ---------- */
+
+@Composable
+private fun GlassTopBar(
+    title: String,
+    count: Int,
+    onClose: () -> Unit,
+    onSave: () -> Unit,
+    onRefresh: () -> Unit,
+    height: Dp = 66.dp
+) {
+    val shape  = MaterialTheme.shapes.extraLarge
+    val bg     = MaterialTheme.colorScheme.surface.copy(alpha = 0.28f)
+    val stroke = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(horizontal = 10.dp)
+            .height(height)
+            .clip(shape)
+            .border(1.dp, stroke, shape),
+        color = bg
+    ) {
+        Row(
+            Modifier
+                .fillMaxSize()
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onClose) {
+                Icon(Icons.Default.Close, contentDescription = "Cerrar", tint = Color.White)
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "Seleccionadas: $count",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color(0xFFB2FF59),
+                    maxLines = 1
+                )
+            }
+
+            IconButton(onClick = onRefresh) {
+                Icon(Icons.Default.Refresh, contentDescription = "Refrescar", tint = Color.White)
+            }
+
+            Button(
+                onClick = onSave,
+                shape = RoundedCornerShape(999.dp),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp, pressedElevation = 4.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF43A047),
+                    contentColor = Color.White
+                )
+            ) {
+                Icon(Icons.Default.Check, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text("Guardar")
+            }
+        }
+    }
+}
+
+@Composable
+private fun FilterRow(
+    current: AppFilter,
+    onChange: (AppFilter) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        FilterChip(
+            selected = current == AppFilter.ALL,
+            onClick = { onChange(AppFilter.ALL) },
+            label = { Text("Todas") }
+        )
+        FilterChip(
+            selected = current == AppFilter.USER_ONLY,
+            onClick = { onChange(AppFilter.USER_ONLY) },
+            label = { Text("Solo usuario") }
+        )
+    }
+}
+
+/* ---------- Celdas ---------- */
+
+@Composable
+private fun AppPickTile(
+    app: AppInfo,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    val shape = MaterialTheme.shapes.extraLarge
+    val borderColor = if (selected) Color(0xFF7CB342) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+    val borderWidth = if (selected) 2.dp else 1.dp
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(1.15f)
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.28f), shape)
+            .border(borderWidth, borderColor, shape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Image(
+                bitmap = app.icon.asImageBitmap(),
+                contentDescription = app.label,
+                modifier = Modifier.size(52.dp),
+                contentScale = ContentScale.Fit,
+                filterQuality = FilterQuality.Medium
+            )
+            // Sin texto bajo icono para que se vea limpio en el picker
+        }
+
+        if (selected) {
+            Icon(
+                imageVector = Icons.Filled.Check,
+                contentDescription = null,
+                tint = Color(0xFF7CB342),
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+            )
+        }
+    }
+}
+
+/* ---------- Fondo FIJO ---------- */
+
+@Composable
+private fun BackgroundLayer() {
+    Image(
+        painter = painterResource(R.drawable.kiosk_default_bg),
+        contentDescription = null,
+        modifier = Modifier.fillMaxSize(),
+        contentScale = ContentScale.Crop
+    )
+}
+
+============================================================
+ARCHIVO: D:\GVAMKioskFlavors_totem55\app\src\main\java\com\gvam\kioskportal\util\Pin.kt
+============================================================
+
+package com.gvam.kioskportal.util
+
+import android.content.Context
+import java.security.MessageDigest
+
+object Pin {
+
+    private fun sha256(s: String): String =
+        MessageDigest.getInstance("SHA-256")
+            .digest(s.toByteArray())
+            .joinToString("") { "%02x".format(it) }
+
+    fun savePin(ctx: Context, pin: String) {
+        Prefs.savePinHash(ctx, sha256(pin))
+    }
+
+    fun verifyPin(ctx: Context, pin: String): Boolean {
+        val saved = Prefs.getPinHash(ctx) ?: return false
+        return saved == sha256(pin)
+    }
+}
+
+============================================================
+ARCHIVO: D:\GVAMKioskFlavors_totem55\app\src\main\java\com\gvam\kioskportal\util\Prefs.kt
+============================================================
+
+package com.gvam.kioskportal.util
+
+import android.content.Context
+
+object Prefs {
+    private const val FILE = "portal_prefs"
+
+    // Claves bÃ¡sicas
+    private const val KEY_PKGS              = "selected_packages"
+    private const val KEY_PIN_HASH          = "admin_pin_hash"
+    private const val KEY_TITLE             = "portal_title"
+    private const val KEY_DEVICE_NUMBER     = "device_number"
+    private const val KEY_HIDE_SETTINGS     = "hide_settings"
+    private const val KEY_BG_URI            = "bg_uri"               // compat (fondo)
+    private const val KEY_LAYOUT_HORIZONTAL = "layout_horizontal"
+    private const val KEY_MAINTENANCE       = "kiosk_maintenance"
+
+    // Kiosco extendido
+    private const val KEY_ALLOWLIST   = "kiosk_allowlist"            // lista blanca dinÃ¡mica
+    private const val KEY_KIOSK_STRICT = "kiosk_strict"              // modo estricto (default true)
+
+    // ---- Helpers genÃ©ricos ----
+    private fun sp(ctx: Context) = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+    fun putBool(ctx: Context, key: String, value: Boolean) =
+        sp(ctx).edit().putBoolean(key, value).apply()
+    fun getBool(ctx: Context, key: String, def: Boolean = false): Boolean =
+        sp(ctx).getBoolean(key, def)
+
+    // ---- SelecciÃ³n de apps ----
+    fun saveSelectedPackages(ctx: Context, packages: Set<String>) {
+        sp(ctx).edit().putStringSet(KEY_PKGS, packages).apply()
+    }
+    fun loadSelectedPackages(ctx: Context): Set<String> =
+        sp(ctx).getStringSet(KEY_PKGS, emptySet()) ?: emptySet()
+
+    // ---- PIN admin ----
+    fun hasPin(ctx: Context): Boolean = sp(ctx).contains(KEY_PIN_HASH)
+    fun savePinHash(ctx: Context, hash: String) {
+        sp(ctx).edit().putString(KEY_PIN_HASH, hash).apply()
+    }
+    fun getPinHash(ctx: Context): String? = sp(ctx).getString(KEY_PIN_HASH, null)
+
+    // ---- TÃ­tulo del portal ----
+    /**
+     * Guarda el tÃ­tulo tal cual:
+     *  - null  -> borra la preferencia
+     *  - ""    -> tÃ­tulo vacÃ­o (no se muestra texto)
+     *  - texto -> se guarda tal cual
+     */
+    fun saveTitle(ctx: Context, title: String?) {
+        val e = sp(ctx).edit()
+        if (title == null) e.remove(KEY_TITLE) else e.putString(KEY_TITLE, title)
+        e.apply()
+    }
+    fun loadTitle(ctx: Context): String? = sp(ctx).getString(KEY_TITLE, null)
+    fun clearTitle(ctx: Context) = saveTitle(ctx, null)
+
+    // ---- NÃºmero de dispositivo ----
+    fun saveDeviceNumber(ctx: Context, number: String) {
+        sp(ctx).edit().putString(KEY_DEVICE_NUMBER, number).apply()
+    }
+    fun loadDeviceNumber(ctx: Context): String? =
+        sp(ctx).getString(KEY_DEVICE_NUMBER, null)
+
+    // ---- Ocultar Ajustes ----
+    fun setHideSettings(ctx: Context, hide: Boolean) {
+        sp(ctx).edit().putBoolean(KEY_HIDE_SETTINGS, hide).apply()
+    }
+    fun isSettingsHidden(ctx: Context): Boolean =
+        sp(ctx).getBoolean(KEY_HIDE_SETTINGS, false)
+
+    // ---- Fondo (compat) ----
+    fun setBackgroundUri(ctx: Context, uri: String?) {
+        val e = sp(ctx).edit()
+        if (uri.isNullOrBlank()) e.remove(KEY_BG_URI) else e.putString(KEY_BG_URI, uri)
+        e.apply()
+    }
+    fun getBackgroundUri(ctx: Context): String? =
+        sp(ctx).getString(KEY_BG_URI, null)
+
+    // ---- Layout ----
+    fun setHorizontal(ctx: Context, horizontal: Boolean) {
+        sp(ctx).edit().putBoolean(KEY_LAYOUT_HORIZONTAL, horizontal).apply()
+    }
+    fun isHorizontal(ctx: Context): Boolean =
+        sp(ctx).getBoolean(KEY_LAYOUT_HORIZONTAL, false)
+
+    // ---- Mantenimiento (pausa kiosco) ----
+    fun setMaintenance(ctx: Context, active: Boolean) {
+        sp(ctx).edit().putBoolean(KEY_MAINTENANCE, active).apply()
+    }
+    fun isMaintenance(ctx: Context): Boolean =
+        sp(ctx).getBoolean(KEY_MAINTENANCE, false)
+
+    // ---- Allowlist dinÃ¡mica ----
+    fun getAllowlist(ctx: Context): Set<String> =
+        sp(ctx).getStringSet(KEY_ALLOWLIST, emptySet()) ?: emptySet()
+
+    fun addToAllowlist(ctx: Context, pkg: String) {
+        val s = getAllowlist(ctx).toMutableSet()
+        s += pkg
+        sp(ctx).edit().putStringSet(KEY_ALLOWLIST, s).apply()
+    }
+
+    fun removeFromAllowlist(ctx: Context, pkg: String) {
+        val s = getAllowlist(ctx).toMutableSet()
+        s -= pkg
+        sp(ctx).edit().putStringSet(KEY_ALLOWLIST, s).apply()
+    }
+
+    fun clearAllowlist(ctx: Context) {
+        sp(ctx).edit().remove(KEY_ALLOWLIST).apply()
+    }
+
+    // ---- Modo estricto ----
+    fun setKioskStrict(ctx: Context, strict: Boolean) {
+        sp(ctx).edit().putBoolean(KEY_KIOSK_STRICT, strict).apply()
+    }
+    fun isKioskStrict(ctx: Context): Boolean =
+        sp(ctx).getBoolean(KEY_KIOSK_STRICT, true)
+}

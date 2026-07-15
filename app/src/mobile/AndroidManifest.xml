@@ -1,12 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
-    <application>
+    <application
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        tools:replace="android:icon,android:roundIcon">
 
-        <!--
-        El MDM autorizará esta aplicación para Lock Task.
-        Esta APK no actúa como Device Owner.
-        -->
         <activity
             android:name=".ui.MainActivity"
             android:lockTaskMode="if_whitelisted" />
