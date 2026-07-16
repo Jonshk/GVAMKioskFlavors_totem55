@@ -3,6 +3,7 @@
 package com.gvam.kioskportal.ui
 
 import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -68,12 +69,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.graphics.drawable.toBitmap
+import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.gvam.kioskportal.BuildConfig
 import com.gvam.kioskportal.R
 import com.gvam.kioskportal.model.AppDisplayConfig
 import com.gvam.kioskportal.model.BackgroundMode
@@ -97,7 +98,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        if (shouldRunKiosk()) {
+        if (shouldUseKioskUi()) {
             enterKioskUi()
         }
 
@@ -110,21 +111,22 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (shouldRunKiosk()) {
+
+        if (shouldUseKioskUi()) {
             enterKioskUi()
         }
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus && shouldRunKiosk()) {
+
+        if (hasFocus && shouldUseKioskUi()) {
             configureSystemBars()
         }
     }
 
-    private fun shouldRunKiosk(): Boolean =
-        (BuildConfig.IS_TOTEM || BuildConfig.KIOSK_FORCE) &&
-            !Prefs.isMaintenance(this)
+    private fun shouldUseKioskUi(): Boolean =
+        !Prefs.isMaintenance(this)
 
     private fun enterKioskUi() {
         val dpm = getSystemService(DevicePolicyManager::class.java)
@@ -137,12 +139,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun configureSystemBars() {
-        WindowInsetsControllerCompat(
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+
+        WindowCompat.getInsetsController(
             window,
             window.decorView
         ).apply {
-            hide(WindowInsetsCompat.Type.statusBars())
-            show(WindowInsetsCompat.Type.navigationBars())
+            hide(WindowInsetsCompat.Type.systemBars())
             isAppearanceLightStatusBars = false
             isAppearanceLightNavigationBars = false
             systemBarsBehavior =
@@ -1887,18 +1890,23 @@ private fun loadLauncherScreenData(
     val configs = Prefs.loadAppDisplayConfigs(context)
     val packages = Prefs.loadSelectedPackagesOrdered(context)
 
-    val apps = packages.mapIndexed { index, packageName ->
-        val originalLabel = runCatching {
-            val appInfo = packageManager.getApplicationInfo(
+    val apps = packages.mapIndexedNotNull { index, packageName ->
+        val appInfo = runCatching {
+            packageManager.getApplicationInfo(
                 packageName,
                 0
             )
-            packageManager
-                .getApplicationLabel(appInfo)
-                .toString()
-                .trim()
-                .ifBlank { packageName }
-        }.getOrDefault(packageName)
+        }.getOrNull() ?: return@mapIndexedNotNull null
+
+        if (!appInfo.enabled) {
+            return@mapIndexedNotNull null
+        }
+
+        val originalLabel = packageManager
+            .getApplicationLabel(appInfo)
+            .toString()
+            .trim()
+            .ifBlank { packageName }
 
         val config = (
             configs[packageName] ?: AppDisplayConfig(
@@ -1983,19 +1991,50 @@ private fun resizeBitmap(
     )
 }
 
+private fun resolveLaunchIntent(
+    packageManager: PackageManager,
+    packageName: String
+): Intent? {
+    packageManager.getLaunchIntentForPackage(
+        packageName
+    )?.let { return it }
+
+    val launcherQuery = Intent(Intent.ACTION_MAIN).apply {
+        addCategory(Intent.CATEGORY_LAUNCHER)
+        setPackage(packageName)
+    }
+
+    val resolved = packageManager.resolveActivity(
+        launcherQuery,
+        PackageManager.MATCH_DEFAULT_ONLY
+    ) ?: return null
+
+    val activityInfo = resolved.activityInfo ?: return null
+
+    return Intent(Intent.ACTION_MAIN).apply {
+        addCategory(Intent.CATEGORY_LAUNCHER)
+        component = ComponentName(
+            activityInfo.packageName,
+            activityInfo.name
+        )
+    }
+}
+
 private fun launchSelectedApp(
     context: Context,
     packageManager: PackageManager,
     packageName: String,
     label: String
 ) {
-    val launchIntent =
-        packageManager.getLaunchIntentForPackage(packageName)
+    val launchIntent = resolveLaunchIntent(
+        packageManager = packageManager,
+        packageName = packageName
+    )
 
     if (launchIntent == null) {
         Toast.makeText(
             context,
-            "$label no tiene una pantalla de inicio disponible",
+            "$label no est\u00E1 instalado, est\u00E1 deshabilitado o no tiene una actividad de inicio",
             Toast.LENGTH_LONG
         ).show()
         return

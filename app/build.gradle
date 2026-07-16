@@ -8,11 +8,11 @@ android {
     compileSdk 35
 
     defaultConfig {
-        applicationId "com.gvam.kioskportal"
+        applicationId "com.gvam.securelauncher"
         minSdk 26
         targetSdk 35
-        versionCode 1
-        versionName "1.0"
+        versionCode 2
+        versionName "2.0"
     }
 
     flavorDimensions "target"
@@ -31,6 +31,15 @@ android {
         }
     }
 
+    signingConfigs {
+        release {
+            storeFile file("C:/llaves/gvam_secure_launcher_release.jks")
+            storePassword "Gvam2026Launcher!"
+            keyAlias "gvam-secure-launcher"
+            keyPassword "Gvam2026Launcher!"
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix ".dev"
@@ -39,6 +48,7 @@ android {
             buildConfigField "boolean", "KIOSK_FORCE", "true"
         }
         release {
+            signingConfig signingConfigs.release
             // En release solo el flavor totem activará kiosco por IS_TOTEM=true
             buildConfigField "boolean", "KIOSK_FORCE", "false"
             minifyEnabled false
