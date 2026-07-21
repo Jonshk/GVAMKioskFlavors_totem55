@@ -107,6 +107,15 @@ class MainActivity : ComponentActivity() {
                 PortalScreen()
             }
         }
+
+        // Reaplica el modo inmersivo una vez el arbol de vistas de Compose
+        // ya esta adjunto a la ventana. En algunos fabricantes, llamar a
+        // hide() antes de que el decorView este listo no se conserva.
+        window.decorView.post {
+            if (shouldUseKioskUi()) {
+                configureSystemBars()
+            }
+        }
     }
 
     override fun onResume() {
@@ -138,8 +147,14 @@ class MainActivity : ComponentActivity() {
         configureSystemBars()
     }
 
+    @Suppress("DEPRECATION")
     private fun configureSystemBars() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
+
+        // Fondo transparente en ambas barras: si algun fabricante no llega
+        // a ocultarlas del todo, al menos no se ve una franja blanca solida.
+        window.statusBarColor = android.graphics.Color.TRANSPARENT
+        window.navigationBarColor = android.graphics.Color.TRANSPARENT
 
         WindowCompat.getInsetsController(
             window,
@@ -152,6 +167,18 @@ class MainActivity : ComponentActivity() {
                 WindowInsetsControllerCompat
                     .BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
+
+        // Fallback con los flags clasicos para ROMs de fabricante (tablets
+        // y totems economicos) que no respetan bien la API moderna de
+        // insets. No hace da\u00F1o dejarlo tambien en versiones nuevas.
+        window.decorView.systemUiVisibility = (
+            android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                or android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
+                or android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                or android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                or android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                or android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+            )
     }
 }
 

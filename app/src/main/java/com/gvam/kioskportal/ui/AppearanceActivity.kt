@@ -21,9 +21,14 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -1644,6 +1649,22 @@ private fun <T> ChoiceRow(
     }
 }
 
+// ============================================================================
+// SELECTOR DE COLOR
+// Ademas del campo hexadecimal, al tocar el cuadrado de color (o el boton de
+// paleta) se abre una rejilla de muestras para elegir el color tocando.
+// Se usa en los 7 puntos de color de esta pantalla sin cambiar sus llamadas.
+// ============================================================================
+
+private val PALETA_COLORES: List<Long> = listOf(
+    0xFFF44336L, 0xFFE91E63L, 0xFF9C27B0L, 0xFF673AB7L,
+    0xFF3F51B5L, 0xFF2196F3L, 0xFF03A9F4L, 0xFF00BCD4L,
+    0xFF009688L, 0xFF4CAF50L, 0xFF8BC34AL, 0xFFCDDC39L,
+    0xFFFFEB3BL, 0xFFFFC107L, 0xFFFF9800L, 0xFFFF5722L,
+    0xFF795548L, 0xFF9E9E9EL, 0xFF607D8BL, 0xFF000000L,
+    0xFFFFFFFFL, 0xFF1B2117L, 0xFF344E25L, 0xFF252327L
+)
+
 @Composable
 private fun HexColorEditor(
     title: String,
@@ -1654,8 +1675,10 @@ private fun HexColorEditor(
     var text by remember(value) {
         mutableStateOf(formatColor(value))
     }
+    var showPalette by remember { mutableStateOf(false) }
 
     val parsed = parseColor(text)
+    val currentColor = parsed ?: value
 
     Column(Modifier.fillMaxWidth()) {
         Text(
@@ -1670,10 +1693,13 @@ private fun HexColorEditor(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Cuadrado de color: tocable, abre la paleta.
             Surface(
-                modifier = Modifier.size(48.dp),
+                modifier = Modifier
+                    .size(48.dp)
+                    .clickable(enabled = enabled) { showPalette = true },
                 shape = RoundedCornerShape(14.dp),
-                color = colorFromLong(parsed ?: value),
+                color = colorFromLong(currentColor),
                 border = BorderStroke(
                     1.dp,
                     MaterialTheme.colorScheme.outlineVariant
@@ -1703,7 +1729,66 @@ private fun HexColorEditor(
                 label = { Text("#AARRGGBB") },
                 isError = text.isNotBlank() && parsed == null
             )
+
+            Spacer(Modifier.width(8.dp))
+
+            IconButton(
+                onClick = { showPalette = true },
+                enabled = enabled
+            ) {
+                Icon(
+                    Icons.Filled.Palette,
+                    contentDescription = "Abrir paleta de colores"
+                )
+            }
         }
+    }
+
+    if (showPalette) {
+        AlertDialog(
+            onDismissRequest = { showPalette = false },
+            title = { Text("Elegir color") },
+            text = {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(6),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.height(220.dp)
+                ) {
+                    items(PALETA_COLORES) { colorValor ->
+                        val seleccionado = colorValor == currentColor
+
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(
+                                    colorFromLong(colorValor),
+                                    CircleShape
+                                )
+                                .border(
+                                    width = if (seleccionado) 3.dp else 1.dp,
+                                    color = if (seleccionado) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        Color.Gray
+                                    },
+                                    shape = CircleShape
+                                )
+                                .clickable {
+                                    text = formatColor(colorValor)
+                                    onChanged(colorValor)
+                                    showPalette = false
+                                }
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showPalette = false }) {
+                    Text("Cerrar")
+                }
+            }
+        )
     }
 }
 
